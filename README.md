@@ -1,5 +1,7 @@
 # Nuova One Fraud Prevention Plugin Documentation
 
+This plugin is provided at no charge, and with no support, by Nuova Webs. For professional installations and general installation queries, you can email concierge@nuovawebs.com
+
 ## Installation
 
 1.  **File Placement:** Create a new directory named `geoippro` inside your Clientexec `/plugins/snapins/` directory.
