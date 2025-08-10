@@ -26,7 +26,7 @@ After installation, navigate to **Settings > Plugins > Snapins** in your Cliente
 
 * **Check for Country Mismatch:** Set to `Yes` to flag orders where the client's IP address country doesn't match their billing address country.
 
-* **Check for Common VPN/Proxy Ports:** A heuristic check to flag IPs that have common VPN/proxy ports open. Note that the provided code has a mock check and this functionality will require further implementation.
+* **Check for Common VPN/Proxy Ports:** A heuristic check to flag IPs that have common VPN/proxy ports open. Note the presence of these ports being open isn't the end-all for determining actual proxy usage. A more advanced check will be required (such as via nmap) to determine if there is such a proxy/vpn server actually running on these ports. This is due to many ISP end-user devices having some of these ports open by default (and unclosable) due to most likely being used for management.
 
 * **Check for Data Center/Mobile IP:** Set to `Yes` to check if the client's IP belongs to a data center or mobile network using the GeoLite2 ASN database.
 

@@ -312,10 +312,6 @@ class PluginGeoippro extends SnapinPlugin
             
             // Perform the port check if the setting is enabled.
             if (!$isFraud && $checkPorts) {
-                // IMPORTANT: Performing a live port scan from a web server is not a reliable
-                // or recommended method. It is often blocked by firewalls and can be
-                // a security risk. For this example, we are simulating a check.
-                
                 // An array of common VPN/proxy ports.
                 $vpnProxyPorts = [
                     1194,  // OpenVPN
@@ -325,10 +321,17 @@ class PluginGeoippro extends SnapinPlugin
                     3128,  // Common proxy port
                 ];
 
-                // For the purpose of this mock, let's assume a "suspicious" IP.
-                if ($userIp === '1.2.3.4') {
-                     $isFraud = true;
-                     $fraudReason .= 'IP address is a known VPN/proxy host. ';
+                // Attempt to open a socket to each port.
+                foreach ($vpnProxyPorts as $port) {
+                    // Timeout is set to 1 second to avoid hanging the process.
+                    $connection = @fsockopen($userIp, $port, $errno, $errstr, 1);
+                    if (is_resource($connection)) {
+                        $isFraud = true;
+                        $fraudReason .= "Common VPN/proxy port {$port} is open on IP {$userIp}. ";
+                        fclose($connection);
+                        // Exit the loop after finding the first open port.
+                        break;
+                    }
                 }
             }
 
