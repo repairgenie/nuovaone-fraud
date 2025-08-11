@@ -128,6 +128,31 @@ class PluginGeoippro extends SnapinPlugin
     ];
 
     /**
+     * Calculates the distance between two points on Earth using the Haversine formula.
+     *
+     * @param float $lat1 Latitude of the first point.
+     * @param float $lon1 Longitude of the first point.
+     * @param float $lat2 Latitude of the second point.
+     * @param float $lon2 Longitude of the second point.
+     * @return float The distance in miles.
+     */
+    private function haversineDistance($lat1, $lon1, $lat2, $lon2)
+    {
+        $earthRadius = 3958.8; // Earth's radius in miles
+
+        $latDelta = deg2rad($lat2 - $lat1);
+        $lonDelta = deg2rad($lon2 - $lon1);
+
+        $a = sin($latDelta / 2) * sin($latDelta / 2) +
+             cos(deg2rad($lat1)) * cos(deg2rad($lat2)) *
+             sin($lonDelta / 2) * sin($lonDelta / 2);
+        
+        $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+        
+        return $earthRadius * $c;
+    }
+
+    /**
      * This is the main callback function that is triggered when a new invoice is created.
      * It will perform the fraud check and update the invoice status if fraud is detected.
      *
@@ -161,7 +186,7 @@ class PluginGeoippro extends SnapinPlugin
             $countryCodesList = array_map('trim', $countryCodesList);
 
             // Log a message to the Clientexec log file (ce.log) for debugging.
-            CE_Lib::log(4, "Starting GeoLite2 fraud check for invoice ID: " . $invoice->getId());
+            CE_Lib::log(4, "Starting fraud checks for invoice ID: " . $invoice->getId());
 
             // We need to get the billing address and email to check for fraud.
             $billingAddress = $client->getPrimaryContact()->getBillAddress();
@@ -173,32 +198,14 @@ class PluginGeoippro extends SnapinPlugin
             $clientFullName = $clientFirstName . ' ' . $clientLastName;
             $clientPhoneNumber = $client->getPrimaryContact()->getPhoneNumber();
 
-
             $isFraud = false;
             $fraudReason = '';
+            
+            // Check if any of the MaxMind-related features are enabled.
+            $anyMaxMindCheckEnabled = $checkMismatch || $checkAsn || $checkDistance || ($countryListMode > 0);
 
-            // Get the IP's country code and lat/long from the GeoLite2 City database.
-            // A real implementation would instantiate the GeoLite2 Reader here.
-            // try {
-            //     $cityReader = new Reader($cityDatabasePath);
-            //     $cityRecord = $cityReader->city($userIp);
-            //     $ipCountryCode = $cityRecord->country->isoCode;
-            //     $ipLat = $cityRecord->location->latitude;
-            //     $ipLong = $cityRecord->location->longitude;
-            // } catch (Exception $e) {
-            //     CE_Lib::log(4, "GeoLite2 City lookup failed for IP: {$userIp}. Error: " . $e->getMessage());
-            //     $ipCountryCode = null;
-            //     $ipLat = null;
-            //     $ipLong = null;
-            // }
-
-            // Since we can't make an actual API call, we'll mock a response.
-            $mockIpCountryCode = 'US'; // Mock IP country
-            $mockIpLat = 34.0522;    // Mock IP latitude (e.g., Los Angeles)
-            $mockIpLong = -118.2437; // Mock IP longitude
-
-            // --- New FraudRecord Check ---
-            if (!$isFraud && $checkFraudRecord && $fraudRecordApiKey) {
+            // --- FraudRecord Check (now dependent on MaxMind checks) ---
+            if (!$isFraud && $checkFraudRecord && $fraudRecordApiKey && $anyMaxMindCheckEnabled) {
                 // In a real implementation, you would make an API call to FraudRecord.
                 // $fraudRecordUrl = 'https://www.fraudrecord.com/api/v1/';
                 // $ch = curl_init();
@@ -234,22 +241,27 @@ class PluginGeoippro extends SnapinPlugin
                 
                 $hasFraudRecordReport = false;
                 $fraudRecordReports = [];
+                $scoreThresholdPassed = false;
 
                 if ($mockFraudRecordData['email']['reports'] > 0 || $mockFraudRecordData['email']['score'] > $fraudRecordScoreThreshold) {
                     $hasFraudRecordReport = true;
-                    $fraudRecordReports[] = 'Email address has ' . $mockFraudRecordData['email']['reports'] . ' reports and a score of ' . $mockFraudRecordData['email']['score'] . '. Status: ' . (($mockFraudRecordData['email']['score'] > $fraudRecordScoreThreshold) ? 'BAD' : 'OK') . '.';
+                    if ($mockFraudRecordData['email']['score'] > $fraudRecordScoreThreshold) $scoreThresholdPassed = true;
+                    $fraudRecordReports[] = 'Email address has ' . $mockFraudRecordData['email']['reports'] . ' reports and a score of ' . $mockFraudRecordData['email']['score'] . '. Status: ' . (($scoreThresholdPassed) ? 'BAD' : 'OK') . '.';
                 }
                 if ($mockFraudRecordData['ip']['reports'] > 0 || $mockFraudRecordData['ip']['score'] > $fraudRecordScoreThreshold) {
                     $hasFraudRecordReport = true;
-                    $fraudRecordReports[] = 'IP address has ' . $mockFraudRecordData['ip']['reports'] . ' reports and a score of ' . $mockFraudRecordData['ip']['score'] . '. Status: ' . (($mockFraudRecordData['ip']['score'] > $fraudRecordScoreThreshold) ? 'BAD' : 'OK') . '.';
+                    if ($mockFraudRecordData['ip']['score'] > $fraudRecordScoreThreshold) $scoreThresholdPassed = true;
+                    $fraudRecordReports[] = 'IP address has ' . $mockFraudRecordData['ip']['reports'] . ' reports and a score of ' . $mockFraudRecordData['ip']['score'] . '. Status: ' . (($scoreThresholdPassed) ? 'BAD' : 'OK') . '.';
                 }
                 if ($mockFraudRecordData['name']['reports'] > 0 || $mockFraudRecordData['name']['score'] > $fraudRecordScoreThreshold) {
                     $hasFraudRecordReport = true;
-                    $fraudRecordReports[] = 'Name has ' . $mockFraudRecordData['name']['reports'] . ' reports and a score of ' . $mockFraudRecordData['name']['score'] . '. Status: ' . (($mockFraudRecordData['name']['score'] > $fraudRecordScoreThreshold) ? 'BAD' : 'OK') . '.';
+                    if ($mockFraudRecordData['name']['score'] > $fraudRecordScoreThreshold) $scoreThresholdPassed = true;
+                    $fraudRecordReports[] = 'Name has ' . $mockFraudRecordData['name']['reports'] . ' reports and a score of ' . $mockFraudRecordData['name']['score'] . '. Status: ' . (($scoreThresholdPassed) ? 'BAD' : 'OK') . '.';
                 }
                 if ($mockFraudRecordData['phone']['reports'] > 0 || $mockFraudRecordData['phone']['score'] > $fraudRecordScoreThreshold) {
                     $hasFraudRecordReport = true;
-                    $fraudRecordReports[] = 'Phone number has ' . $mockFraudRecordData['phone']['reports'] . ' reports and a score of ' . $mockFraudRecordData['phone']['score'] . '. Status: ' . (($mockFraudRecordData['phone']['score'] > $fraudRecordScoreThreshold) ? 'BAD' : 'OK') . '.';
+                    if ($mockFraudRecordData['phone']['score'] > $fraudRecordScoreThreshold) $scoreThresholdPassed = true;
+                    $fraudRecordReports[] = 'Phone number has ' . $mockFraudRecordData['phone']['reports'] . ' reports and a score of ' . $mockFraudRecordData['phone']['score'] . '. Status: ' . (($scoreThresholdPassed) ? 'BAD' : 'OK') . '.';
                 }
 
                 if ($hasFraudRecordReport) {
@@ -258,8 +270,10 @@ class PluginGeoippro extends SnapinPlugin
                 }
             }
 
-            // --- New Country Block/Allow List Check ---
+            // --- Country Block/Allow List Check ---
             if (!$isFraud && $countryListMode > 0) {
+                // Since we can't make an actual API call, we'll mock a response.
+                $mockIpCountryCode = 'US';
                 if ($countryListMode === 1) { // Allowlist mode
                     if (!in_array($mockIpCountryCode, $countryCodesList)) {
                         $isFraud = true;
@@ -275,32 +289,32 @@ class PluginGeoippro extends SnapinPlugin
             
             // Perform the country mismatch check if the setting is enabled.
             if (!$isFraud && $checkMismatch) {
+                // Since we can't make an actual API call, we'll mock a response.
+                $mockIpCountryCode = 'US';
                 if ($billingCountry !== $mockIpCountryCode) {
                     $isFraud = true;
                     $fraudReason .= 'IP country (' . $mockIpCountryCode . ') does not match billing country (' . $billingCountry . '). ';
                 }
             }
 
-            // --- New Distance Check ---
+            // --- Distance Check ---
             if (!$isFraud && $checkDistance) {
                 // To perform this check, you would need to get the latitude and longitude
                 // of the billing address. This typically requires a geocoding API call
                 // (e.g., Google Maps Geocoding API). Clientexec does not store this.
                 // For this example, we will use mock coordinates.
-                $mockBillingLat = 34.0522; // Mock billing latitude (e.g., Los Angeles)
+                $mockIpLat = 34.0522; // Mock IP latitude
+                $mockIpLong = -118.2437; // Mock IP longitude
+                $mockBillingLat = 34.0522; // Mock billing latitude
                 $mockBillingLong = -118.2437; // Mock billing longitude
 
                 // Let's create a mock scenario where the address is far away.
-                // e.g., IP in Los Angeles, billing address in New York
                 if ($userIp === '5.6.7.8') {
                     $mockBillingLat = 40.7128; // New York
                     $mockBillingLong = -74.0060;
                 }
 
-                // Helper function to calculate distance using the Haversine formula.
-                $distance = $this->haversineDistance(
-                    $mockIpLat, $mockIpLong, $mockBillingLat, $mockBillingLong
-                );
+                $distance = $this->haversineDistance($mockIpLat, $mockIpLong, $mockBillingLat, $mockBillingLong);
 
                 CE_Lib::log(4, "Distance between IP and billing address is {$distance} miles.");
 
@@ -321,33 +335,19 @@ class PluginGeoippro extends SnapinPlugin
                     3128,  // Common proxy port
                 ];
 
-                // Attempt to open a socket to each port.
                 foreach ($vpnProxyPorts as $port) {
-                    // Timeout is set to 1 second to avoid hanging the process.
                     $connection = @fsockopen($userIp, $port, $errno, $errstr, 1);
                     if (is_resource($connection)) {
                         $isFraud = true;
                         $fraudReason .= "Common VPN/proxy port {$port} is open on IP {$userIp}. ";
                         fclose($connection);
-                        // Exit the loop after finding the first open port.
                         break;
                     }
                 }
             }
 
-            // --- New ASN check ---
+            // --- ASN check ---
             if (!$isFraud && $checkAsn) {
-                // To perform this check, you would need to get the ASN organization name
-                // from the GeoLite2 ASN database.
-                // try {
-                //     $asnReader = new Reader($asnDatabasePath);
-                //     $asnRecord = $asnReader->asn($userIp);
-                //     $asnOrganization = $asnRecord->autonomousSystemOrganization;
-                // } catch (Exception $e) {
-                //     CE_Lib::log(4, "GeoLite2 ASN lookup failed for IP: {$userIp}. Error: " . $e->getMessage());
-                //     $asnOrganization = '';
-                // }
-
                 // Since we can't make a real lookup, we'll use a mock organization name.
                 $mockAsnOrganization = 'AS12345 Mock Data Center';
                 if ($userIp === '9.10.11.12') {
@@ -389,13 +389,9 @@ class PluginGeoippro extends SnapinPlugin
 
             // If any of the checks flagged the order, mark the invoice as fraudulent.
             if ($isFraud) {
-                // Set the invoice to a "Fraud" status.
                 $invoice->setInvoiceStatus(INVOICE_STATUS_FRAUD);
                 $invoice->save();
-                
-                // Add a note to the invoice for the admin to see.
                 $invoice->addNote($fraudReason, 'Admin', 0);
-                
                 CE_Lib::log(4, "Fraud detected for invoice ID " . $invoice->getId() . ". Reason: " . $fraudReason);
             } else {
                 CE_Lib::log(4, "No fraud detected for invoice ID " . $invoice->getId() . ".");
@@ -404,30 +400,5 @@ class PluginGeoippro extends SnapinPlugin
         } catch (Exception $e) {
             CE_Lib::log(4, "Error in GeoLite2 plugin: " . $e->getMessage());
         }
-    }
-
-    /**
-     * Calculates the distance between two points on Earth using the Haversine formula.
-     *
-     * @param float $lat1 Latitude of the first point.
-     * @param float $lon1 Longitude of the first point.
-     * @param float $lat2 Latitude of the second point.
-     * @param float $lon2 Longitude of the second point.
-     * @return float The distance in miles.
-     */
-    private function haversineDistance($lat1, $lon1, $lat2, $lon2)
-    {
-        $earthRadius = 3958.8; // Earth's radius in miles
-
-        $latDelta = deg2rad($lat2 - $lat1);
-        $lonDelta = deg2rad($lon2 - $lon1);
-
-        $a = sin($latDelta / 2) * sin($latDelta / 2) +
-             cos(deg2rad($lat1)) * cos(deg2rad($lat2)) *
-             sin($lonDelta / 2) * sin($lonDelta / 2);
-        
-        $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
-        
-        return $earthRadius * $c;
     }
 }
