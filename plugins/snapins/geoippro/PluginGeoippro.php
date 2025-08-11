@@ -201,11 +201,8 @@ class PluginGeoippro extends SnapinPlugin
             $isFraud = false;
             $fraudReason = '';
             
-            // Check if any of the MaxMind-related features are enabled.
-            $anyMaxMindCheckEnabled = $checkMismatch || $checkAsn || $checkDistance || ($countryListMode > 0);
-
-            // --- FraudRecord Check (now dependent on MaxMind checks) ---
-            if (!$isFraud && $checkFraudRecord && $fraudRecordApiKey && $anyMaxMindCheckEnabled) {
+            // --- FraudRecord Check (now independent of MaxMind checks) ---
+            if (!$isFraud && $checkFraudRecord && $fraudRecordApiKey) {
                 // In a real implementation, you would make an API call to FraudRecord.
                 // $fraudRecordUrl = 'https://www.fraudrecord.com/api/v1/';
                 // $ch = curl_init();
